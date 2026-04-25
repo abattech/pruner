@@ -241,7 +241,7 @@ def process_prune_folder(
     all_prune_dirs: set[Path],
     args: argparse.Namespace,
     now: float,
-    errors: list[str],
+    errors: list[tuple[str, str]],
 ) -> tuple[int, int]:
     """Process one .prune folder. Returns (files_deleted, bytes_freed)."""
     max_age = read_max_age_days(folder / ".prune")
@@ -261,7 +261,7 @@ def process_prune_folder(
         statuses = remote_check(target.ssh, candidates)
     except RuntimeError as e:
         if args.skip_errors:
-            errors.append(f'folder "{folder_disp}": ssh — {e}')
+            errors.append((folder_disp, f'ssh — {e}'))
             return 0, 0
         print(header, file=sys.stderr)
         sys.exit(f'   Aborting: cannot verify backup — {e}')
@@ -278,12 +278,14 @@ def process_prune_folder(
     if unverified:
         if args.skip_errors:
             for c, reason in unverified:
-                errors.append(f'[{reason}] {display_name(c.path, target.local)}')
+                rel = c.path.relative_to(folder)
+                errors.append((folder_disp, f'[{reason}] {rel}'))
         else:
             print(header, file=sys.stderr)
             print(f'   {len(unverified)} old file(s) not safely backed up:', file=sys.stderr)
             for c, reason in unverified:
-                print(f"      [{reason}] {display_name(c.path, target.local)}", file=sys.stderr)
+                rel = c.path.relative_to(folder)
+                print(f"      [{reason}] {rel}", file=sys.stderr)
             sys.exit("Aborting: backup is not in sync. Re-run after the backup is up to date.")
 
     prune_size = sum(c.size for c in verified)
@@ -313,7 +315,7 @@ def process_prune_folder(
 
 
 def process_target(target: Target, args: argparse.Namespace, now: float,
-                   errors: list[str]) -> tuple[int, int]:
+                   errors: list[tuple[str, str]]) -> tuple[int, int]:
     prune_dirs = find_prune_folders(target.local)
     if not prune_dirs:
         print(f"[{target.local}] no .prune files found.")
@@ -353,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     now = time.time()
     grand_deleted = 0
     grand_freed = 0
-    errors: list[str] = []
+    errors: list[tuple[str, str]] = []
     for t in targets:
         d, f = process_target(t, args, now, errors)
         grand_deleted += d
@@ -361,8 +363,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if errors:
         print(f"\nSkipped {len(errors)} item(s) due to errors:")
-        for line in errors:
-            print(f"   {line}")
+        last_folder = None
+        for folder_disp, msg in errors:
+            if folder_disp != last_folder:
+                print(f'   {yellow(folder_disp)}')
+                last_folder = folder_disp
+            print(f'      {msg}')
 
     suffix = " (dry run)" if args.dry_run else ""
     print(f"\nDone. Deleted {grand_deleted} file(s), freed {human_size(grand_freed)}{suffix}.")
