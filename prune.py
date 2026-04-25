@@ -8,6 +8,7 @@ See CLAUDE.md and prune.yaml.example for usage.
 from __future__ import annotations
 
 import argparse
+import atexit
 import dataclasses
 import os
 import posixpath
@@ -417,6 +418,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verbose", action="store_true",
                         help="Reserved for future use.")
     args = parser.parse_args(argv)
+
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        def _wait_for_enter():
+            try:
+                input("\nPress Enter to exit...")
+            except EOFError:
+                pass
+        atexit.register(_wait_for_enter)
 
     if not args.config.is_absolute():
         args.config = Path(__file__).resolve().parent / args.config
