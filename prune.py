@@ -149,17 +149,15 @@ def fill_remote_paths(candidates: list[Candidate], local_root: Path, remote_root
         c.remote_path = posixpath.join(remote_root, *rel.parts)
 
 
-def remote_check(ssh: str, candidates: list[Candidate]) -> dict[str, str]:
-    """Run a single SSH call to check existence + size for every candidate.
-    Returns per-path status: "OK", "MISSING", or "MISMATCH:<remote_size>".
-    Raises RuntimeError on SSH or protocol failure."""
-    if not candidates:
-        return {}
+REMOTE_CHECK_BATCH = 1000  # files per ssh call; keeps argv well under ARG_MAX
+
+
+def _remote_check_batch(ssh: str, batch: list[Candidate]) -> dict[str, str]:
     # ssh joins remote-command argv with spaces, so we must shell-quote ourselves
     # for paths with spaces, parens, quotes, etc. to survive intact.
     quoted = " ".join(
         shlex.quote(a)
-        for c in candidates
+        for c in batch
         for a in (c.remote_path, str(c.size))
     )
     remote_cmd = f"bash -s -- {quoted}"
@@ -177,12 +175,22 @@ def remote_check(ssh: str, candidates: list[Candidate]) -> dict[str, str]:
     if result.returncode != 0:
         raise RuntimeError(f"ssh exit {result.returncode}: {result.stderr.strip()}")
     lines = result.stdout.splitlines()
-    if len(lines) != len(candidates):
+    if len(lines) != len(batch):
         raise RuntimeError(
-            f"ssh returned {len(lines)} lines for {len(candidates)} files; "
+            f"ssh returned {len(lines)} lines for {len(batch)} files; "
             f"stderr: {result.stderr.strip()}"
         )
-    return {c.remote_path: line for c, line in zip(candidates, lines)}
+    return {c.remote_path: line for c, line in zip(batch, lines)}
+
+
+def remote_check(ssh: str, candidates: list[Candidate]) -> dict[str, str]:
+    """Run SSH calls (in batches) to check existence + size for every candidate.
+    Returns per-path status: "OK", "MISSING", or "MISMATCH:<remote_size>".
+    Raises RuntimeError on SSH or protocol failure."""
+    statuses: dict[str, str] = {}
+    for i in range(0, len(candidates), REMOTE_CHECK_BATCH):
+        statuses.update(_remote_check_batch(ssh, candidates[i:i + REMOTE_CHECK_BATCH]))
+    return statuses
 
 
 def human_size(n: int) -> str:
