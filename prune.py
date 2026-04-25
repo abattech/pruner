@@ -63,7 +63,7 @@ def load_config(path: Path) -> list[Target]:
         for key in ("local", "ssh", "remote"):
             if key not in entry:
                 sys.exit(f"{path}: scan_targets[{i}] missing '{key}'")
-        local = Path(os.path.expanduser(entry["local"])).resolve()
+        local = Path(entry["local"])
         if not local.is_dir():
             sys.exit(f"{path}: scan_targets[{i}].local '{local}' is not a directory")
         targets.append(Target(local=local, ssh=entry["ssh"], remote=entry["remote"].rstrip("/")))
@@ -233,8 +233,7 @@ def process_prune_folder(
 
     statuses, err = remote_check(target.ssh, candidates)
     if err is not None:
-        print(f'Folder "{folder}": skipped — {err}', file=sys.stderr)
-        return 0, 0
+        sys.exit(f'Aborting: cannot verify backup for "{folder}" — {err}')
 
     verified: list[Candidate] = []
     unverified: list[tuple[Candidate, str]] = []
@@ -245,14 +244,14 @@ def process_prune_folder(
         else:
             unverified.append((c, s))
 
-    prune_size = sum(c.size for c in verified)
-
     if unverified:
-        print(f'Folder "{folder}": {len(unverified)} old file(s) not safely backed up:')
-        for c, reason in unverified[:10]:
-            print(f"  [{reason}] {c.path}")
-        if len(unverified) > 10:
-            print(f"  ... and {len(unverified) - 10} more")
+        print(f'Folder "{folder}": {len(unverified)} old file(s) not safely backed up:',
+              file=sys.stderr)
+        for c, reason in unverified:
+            print(f"  [{reason}] {c.path}", file=sys.stderr)
+        sys.exit("Aborting: backup is not in sync. Re-run after the backup is up to date.")
+
+    prune_size = sum(c.size for c in verified)
 
     if not verified:
         print(f'Folder "{folder}": nothing to prune (max_age={max_age}d, '
