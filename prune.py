@@ -167,9 +167,9 @@ def remote_check(ssh: str, candidates: list[Candidate]) -> tuple[dict[str, str],
             timeout=300,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
-        return {}, f"ssh failed: {e}"
+        return RuntimeError(f"ssh failed: {e}")
     if result.returncode != 0:
-        return {}, f"ssh exit {result.returncode}: {result.stderr.strip()}"
+        raise RuntimeError(f"ssh exit {result.returncode}: {result.stderr.strip()}")
     lines = result.stdout.splitlines()
     if len(lines) != len(candidates):
         return {}, (
@@ -324,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Reserved for future use.")
     args = parser.parse_args(argv)
 
+    if not args.config.is_absolute():
+        args.config = Path(__file__).resolve().parent / args.config
     if not args.config.exists():
         sys.exit(f"config not found: {args.config}")
     targets = load_config(args.config)
