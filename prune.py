@@ -180,16 +180,32 @@ def remote_check(ssh: str, candidates: list[Candidate]) -> tuple[dict[str, str],
 
 
 def human_size(n: int) -> str:
-    return f"{n / (1024 * 1024):.1f} Mb"
+    return f"{n / (1024 * 1024):.0f} Mb"
 
 
-def prompt_confirm(folder: Path, total_size: int, prune_size: int) -> bool:
-    msg = (
-        f'Folder "{folder}": total size {human_size(total_size)}, '
-        f'size to prune {human_size(prune_size)}. Allow pruning [y]/n? '
-    )
+USE_COLOR = sys.stdout.isatty()
+
+
+def yellow(s: str) -> str:
+    return f"\033[33m{s}\033[0m" if USE_COLOR else s
+
+
+def display_name(path: Path, root: Path) -> str:
     try:
-        ans = input(msg).strip().lower()
+        rel = path.relative_to(root)
+    except ValueError:
+        return str(path)
+    s = str(rel)
+    return "." if s == "." else s
+
+
+def folder_header(folder: Path, root: Path) -> str:
+    return yellow(f'Folder "{display_name(folder, root)}":')
+
+
+def prompt_confirm(question: str) -> bool:
+    try:
+        ans = input(question).strip().lower()
     except EOFError:
         return False
     return ans in ("", "y", "yes")
@@ -231,9 +247,12 @@ def process_prune_folder(
     candidates = select_old(files, max_age, now)
     fill_remote_paths(candidates, target.local, target.remote)
 
+    header = folder_header(folder, target.local)
+
     statuses, err = remote_check(target.ssh, candidates)
     if err is not None:
-        sys.exit(f'Aborting: cannot verify backup for "{folder}" — {err}')
+        print(header, file=sys.stderr)
+        sys.exit(f'   Aborting: cannot verify backup — {err}')
 
     verified: list[Candidate] = []
     unverified: list[tuple[Candidate, str]] = []
@@ -245,35 +264,35 @@ def process_prune_folder(
             unverified.append((c, s))
 
     if unverified:
-        print(f'Folder "{folder}": {len(unverified)} old file(s) not safely backed up:',
-              file=sys.stderr)
+        print(header, file=sys.stderr)
+        print(f'   {len(unverified)} old file(s) not safely backed up:', file=sys.stderr)
         for c, reason in unverified:
-            print(f"  [{reason}] {c.path}", file=sys.stderr)
+            print(f"      [{reason}] {display_name(c.path, target.local)}", file=sys.stderr)
         sys.exit("Aborting: backup is not in sync. Re-run after the backup is up to date.")
 
     prune_size = sum(c.size for c in verified)
 
     if not verified:
-        print(f'Folder "{folder}": nothing to prune (max_age={max_age}d, '
-              f'total {human_size(total_size)}).')
         return 0, 0
+
+    size_line = (
+        f'   total size {human_size(total_size)}, '
+        f'size to prune {human_size(prune_size)}.'
+    )
 
     if args.yes:
-        print(
-            f'Folder "{folder}": total size {human_size(total_size)}, '
-            f'size to prune {human_size(prune_size)}. Auto-confirmed (--yes).'
-        )
-        approved = True
+        print(header)
+        print(size_line)
+        print('   Auto-confirmed (--yes).')
     else:
-        approved = prompt_confirm(folder, total_size, prune_size)
-
-    if not approved:
-        print(f'Folder "{folder}": skipped by user.')
-        return 0, 0
+        question = f'{header}\n{size_line}\n   Allow pruning [y]/n? '
+        if not prompt_confirm(question):
+            print('   Skipped by user.')
+            return 0, 0
 
     deleted, freed = delete_files(verified, args.dry_run)
     suffix = " (dry run)" if args.dry_run else ""
-    print(f'Folder "{folder}": deleted {deleted} file(s), freed {human_size(freed)}{suffix}.')
+    print(f'   Deleted {deleted} file(s), freed {human_size(freed)}{suffix}.')
     return deleted, freed
 
 
@@ -283,7 +302,7 @@ def process_target(target: Target, args: argparse.Namespace, now: float) -> tupl
         print(f"[{target.local}] no .prune files found.")
         return 0, 0
     prune_dir_set = set(prune_dirs)
-    print(f"[{target.local}] found {len(prune_dirs)} .prune folder(s).")
+    print(f"[{target.local}]\n found {len(prune_dirs)} pruned folders")
     total_deleted = 0
     total_freed = 0
     for folder in sorted(prune_dirs):
