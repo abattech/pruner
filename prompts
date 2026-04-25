@@ -1,0 +1,10 @@
+Playbook:
+* user runs the prune.py script
+* for every folder containing .prune:
+  * determine max age, 
+  * select files satisfying the condition `age > max_age`, 
+  * for every selected file:
+    * make sure every file exists on the backup server, 
+  * prompt the user to confirm pruning of the folder: "Folder "xxx": total size XXX Mb, size to prune YYY Mb. Allow pruning [y]/n?"
+  * if confirmed, delete all selected files
+

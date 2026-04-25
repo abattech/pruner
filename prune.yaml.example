@@ -1,0 +1,12 @@
+# Sample prune config. Copy to ./prune.yaml and adjust.
+# Each scan target: a local root, an SSH endpoint, and the matching remote root.
+# Files at <local>/<rel> are checked against <ssh>:<remote>/<rel> before deletion.
+
+scan_targets:
+  - local: /storage/emulated/0/DCIM
+    ssh: alexey@backup.lan
+    remote: /backup/phone/DCIM
+
+  - local: /storage/emulated/0/Download
+    ssh: alexey@backup.lan
+    remote: /backup/phone/Download
