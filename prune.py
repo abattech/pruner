@@ -342,6 +342,52 @@ def process_target(target: Target, args: argparse.Namespace, now: float,
     return total_deleted, total_freed
 
 
+def check_command(check_dir: Path, targets: list[Target]) -> int:
+    """Verify every file under `check_dir` is backed up with matching size.
+    Print unverified file paths (relative to `check_dir`), one per line.
+    Returns 0 if everything is OK, 1 if any file is unverified."""
+    if not check_dir.is_dir():
+        sys.exit(f"--check: not a directory: {check_dir}")
+
+    target = None
+    for t in targets:
+        try:
+            check_dir.relative_to(t.local)
+            target = t
+            break
+        except ValueError:
+            continue
+    if target is None:
+        sys.exit(f"--check: {check_dir} is not under any scan_targets local root")
+
+    candidates: list[Candidate] = []
+    for dirpath, _dirnames, filenames in os.walk(check_dir, followlinks=False):
+        for name in filenames:
+            p = Path(dirpath, name)
+            if p.is_symlink() or not p.is_file():
+                continue
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            candidates.append(Candidate(path=p, size=size, mtime=0.0, remote_path=""))
+
+    fill_remote_paths(candidates, target.local, target.remote)
+
+    try:
+        statuses = remote_check(target.ssh, candidates)
+    except RuntimeError as e:
+        sys.exit(f"--check: {e}")
+
+    bad_count = 0
+    for c in candidates:
+        if statuses.get(c.remote_path, "MISSING") != "OK":
+            print(c.path.relative_to(check_dir))
+            bad_count += 1
+
+    return 0 if bad_count == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Backup-aware folder pruner.")
     parser.add_argument("--config", default="prune.yaml", type=Path,
@@ -353,6 +399,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-errors", action="store_true",
                         help="Skip files/folders that can't be verified instead of aborting; "
                              "list them at the end.")
+    parser.add_argument("--check", type=Path, default=None, metavar="DIR",
+                        help="Verify every file under DIR is backed up (size match) and "
+                             "print unverified paths relative to DIR. Skips pruning.")
     parser.add_argument("--verbose", action="store_true",
                         help="Reserved for future use.")
     args = parser.parse_args(argv)
@@ -362,6 +411,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.config.exists():
         sys.exit(f"config not found: {args.config}")
     targets = load_config(args.config)
+
+    if args.check is not None:
+        return check_command(args.check.expanduser().absolute(), targets)
 
     now = time.time()
     grand_deleted = 0
