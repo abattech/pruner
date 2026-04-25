@@ -257,10 +257,20 @@ def process_prune_folder(
     header = folder_header(folder, target.local)
     folder_disp = display_name(folder, target.local)
 
+    header_printed = False
+
+    def emit_header():
+        nonlocal header_printed
+        if not header_printed:
+            print(header)
+            header_printed = True
+
     try:
         statuses = remote_check(target.ssh, candidates)
     except RuntimeError as e:
         if args.skip_errors:
+            emit_header()
+            print(f'   ssh — {e}')
             errors.append((folder_disp, f'ssh — {e}'))
             return 0, 0
         print(header, file=sys.stderr)
@@ -276,16 +286,14 @@ def process_prune_folder(
             unverified.append((c, s))
 
     if unverified:
-        if args.skip_errors:
-            for c, reason in unverified:
-                rel = c.path.relative_to(folder)
+        emit_header()
+        print(f'   {len(unverified)} old file(s) not safely backed up:')
+        for c, reason in unverified:
+            rel = c.path.relative_to(folder)
+            print(f"      [{reason}] {rel}")
+            if args.skip_errors:
                 errors.append((folder_disp, f'[{reason}] {rel}'))
-        else:
-            print(header, file=sys.stderr)
-            print(f'   {len(unverified)} old file(s) not safely backed up:', file=sys.stderr)
-            for c, reason in unverified:
-                rel = c.path.relative_to(folder)
-                print(f"      [{reason}] {rel}", file=sys.stderr)
+        if not args.skip_errors:
             sys.exit("Aborting: backup is not in sync. Re-run after the backup is up to date.")
 
     prune_size = sum(c.size for c in verified)
@@ -299,11 +307,14 @@ def process_prune_folder(
     )
 
     if args.yes:
-        print(header)
+        emit_header()
         print(size_line)
         print('   Auto-confirmed (--yes).')
     else:
-        question = f'{header}\n{size_line}\n   Allow pruning [y]/n? '
+        if header_printed:
+            question = f'{size_line}\n   Allow pruning [y]/n? '
+        else:
+            question = f'{header}\n{size_line}\n   Allow pruning [y]/n? '
         if not prompt_confirm(question):
             print('   Skipped by user.')
             return 0, 0
