@@ -22,6 +22,9 @@ from typing import Iterable
 import yaml
 
 
+PRUNE_INDICATOR = "prune.txt"
+
+
 REMOTE_CHECK_SCRIPT = r"""
 while [ "$#" -gt 0 ]; do
   p=$1; s=$2; shift 2
@@ -73,16 +76,16 @@ def load_config(path: Path) -> list[Target]:
 
 
 def find_prune_folders(root: Path) -> list[Path]:
-    """Return every directory under `root` (inclusive) that contains a `.prune` file."""
+    """Return every directory under `root` (inclusive) that contains a PRUNE_INDICATOR file."""
     found: list[Path] = []
     for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
-        if ".prune" in filenames:
+        if PRUNE_INDICATOR in filenames:
             found.append(Path(dirpath))
     return found
 
 
 def read_max_age_days(prune_file: Path) -> int | None:
-    """Parse the integer day count from a .prune file. Tolerates whitespace
+    """Parse the integer day count from a PRUNE_INDICATOR file. Tolerates whitespace
     and `#` comments. Returns None on invalid/empty input."""
     try:
         text = prune_file.read_text()
@@ -108,10 +111,10 @@ def read_max_age_days(prune_file: Path) -> int | None:
 
 def governed_files(prune_dir: Path, all_prune_dirs: set[Path]) -> Iterable[Path]:
     """Yield every regular file under `prune_dir` whose closest ancestor
-    `.prune` directory is `prune_dir` itself. Skips the `.prune` file.
+    PRUNE_INDICATOR directory is `prune_dir` itself. Skips the PRUNE_INDICATOR file.
     Does not follow symlinks. Folders are never yielded."""
     for dirpath, dirnames, filenames in os.walk(prune_dir, followlinks=False):
-        # Prune any subdir that has its own .prune (it'll be processed separately).
+        # Prune any subdir that has its own PRUNE_INDICATOR (it'll be processed separately).
         # Don't prune prune_dir itself even though it matches all_prune_dirs.
         kept_dirs = []
         for d in dirnames:
@@ -122,7 +125,7 @@ def governed_files(prune_dir: Path, all_prune_dirs: set[Path]) -> Iterable[Path]
         dirnames[:] = kept_dirs
 
         for name in filenames:
-            if name == ".prune":
+            if name == PRUNE_INDICATOR:
                 continue
             p = Path(dirpath, name)
             if p.is_symlink():
@@ -255,8 +258,8 @@ def process_prune_folder(
     now: float,
     errors: list[tuple[str, str]],
 ) -> tuple[int, int]:
-    """Process one .prune folder. Returns (files_deleted, bytes_freed)."""
-    max_age = read_max_age_days(folder / ".prune")
+    """Process one PRUNE_INDICATOR folder. Returns (files_deleted, bytes_freed)."""
+    max_age = read_max_age_days(folder / PRUNE_INDICATOR)
     if max_age is None:
         return 0, 0
 
@@ -341,7 +344,7 @@ def process_target(target: Target, args: argparse.Namespace, now: float,
                    errors: list[tuple[str, str]]) -> tuple[int, int]:
     prune_dirs = find_prune_folders(target.local)
     if not prune_dirs:
-        print(f"[{target.local}] no .prune files found.")
+        print(f"[{target.local}] no PRUNE_INDICATOR files found.")
         return 0, 0
     prune_dir_set = set(prune_dirs)
     print(f"[{target.local}]\n found {len(prune_dirs)} pruned folders")
