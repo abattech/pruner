@@ -197,8 +197,11 @@ def remote_check(ssh: str, candidates: list[Candidate]) -> dict[str, str]:
     return statuses
 
 
+SKIP_BELOW_BYTES = 100 * 1024 * 1024  # don't bother user about folders pruning < 100 Mb
+
+
 def human_size(n: int) -> str:
-    return f"{n / (1024 * 1024):.0f} Mb"
+    return f"{n / (1024 * 1024 * 1024):.1f} Gb"
 
 
 USE_COLOR = sys.stdout.isatty()
@@ -300,6 +303,17 @@ def process_prune_folder(
         else:
             unverified.append((c, s))
 
+    prune_size = sum(c.size for c in verified)
+
+    # Silently skip folders below the bother threshold. Errors still feed the
+    # end-of-run summary in --skip-errors mode.
+    if prune_size < SKIP_BELOW_BYTES:
+        if unverified and args.skip_errors:
+            for c, reason in unverified:
+                rel = c.path.relative_to(folder)
+                errors.append((folder_disp, f'[{reason}] {rel}'))
+        return 0, 0
+
     if unverified:
         emit_header()
         print(f'   {len(unverified)} old file(s) not safely backed up:')
@@ -310,11 +324,6 @@ def process_prune_folder(
                 errors.append((folder_disp, f'[{reason}] {rel}'))
         if not args.skip_errors:
             sys.exit("Aborting: backup is not in sync. Re-run after the backup is up to date.")
-
-    prune_size = sum(c.size for c in verified)
-
-    if not verified:
-        return 0, 0
 
     size_line = (
         f'   total size {human_size(total_size)}, '
