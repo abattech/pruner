@@ -203,6 +203,9 @@ USE_COLOR = sys.stdout.isatty()
 def yellow(s: str) -> str:
     return f"\033[33m{s}\033[0m" if USE_COLOR else s
 
+def red(s: str) -> str:
+    return f"\033[31m{s}\033[0m" if USE_COLOR else s
+
 
 def display_name(path: Path, root: Path) -> str:
     try:
@@ -387,13 +390,14 @@ def check_command(check_dir: Path, targets: list[Target]) -> int:
     except RuntimeError as e:
         sys.exit(f"--check: {e}")
 
-    bad_count = 0
+    s = ""
     for c in candidates:
         if statuses.get(c.remote_path, "MISSING") != "OK":
-            print(c.path.relative_to(check_dir))
-            bad_count += 1
-
-    return 0 if bad_count == 0 else 1
+            s += c.path.relative_to(check_dir) +"\n"
+    if s:
+        print(red(f"These files are not safely backed up (missing or size mismatch):"))
+        print(red(s), end="")
+    return 0 if not s else 1
 
 
 def main(argv: list[str] | None = None) -> int:
