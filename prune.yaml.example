@@ -4,9 +4,9 @@
 
 scan_targets:
   - local: /storage/emulated/0/DCIM
-    ssh: alexey@backup.lan
+    ssh: user@backup.lan
     remote: /backup/phone/DCIM
 
   - local: /storage/emulated/0/Download
-    ssh: alexey@backup.lan
+    ssh: user@backup.lan
     remote: /backup/phone/Download
