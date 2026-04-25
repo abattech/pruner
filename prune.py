@@ -11,6 +11,7 @@ import argparse
 import dataclasses
 import os
 import posixpath
+import shlex
 import subprocess
 import sys
 import time
@@ -148,16 +149,21 @@ def fill_remote_paths(candidates: list[Candidate], local_root: Path, remote_root
         c.remote_path = posixpath.join(remote_root, *rel.parts)
 
 
-def remote_check(ssh: str, candidates: list[Candidate]) -> tuple[dict[str, str], str | None]:
+def remote_check(ssh: str, candidates: list[Candidate]) -> dict[str, str]:
     """Run a single SSH call to check existence + size for every candidate.
-    Returns (per-path status, error). Status is "OK", "MISSING", or "MISMATCH:<remote_size>".
-    On SSH failure, error is non-None and the dict is empty."""
+    Returns per-path status: "OK", "MISSING", or "MISMATCH:<remote_size>".
+    Raises RuntimeError on SSH or protocol failure."""
     if not candidates:
-        return {}, None
-    args = ["ssh", "-o", "BatchMode=yes", ssh, "bash", "-s", "--"]
-    for c in candidates:
-        args.append(c.remote_path)
-        args.append(str(c.size))
+        return {}
+    # ssh joins remote-command argv with spaces, so we must shell-quote ourselves
+    # for paths with spaces, parens, quotes, etc. to survive intact.
+    quoted = " ".join(
+        shlex.quote(a)
+        for c in candidates
+        for a in (c.remote_path, str(c.size))
+    )
+    remote_cmd = f"bash -s -- {quoted}"
+    args = ["ssh", "-o", "BatchMode=yes", ssh, remote_cmd]
     try:
         result = subprocess.run(
             args,
@@ -167,16 +173,16 @@ def remote_check(ssh: str, candidates: list[Candidate]) -> tuple[dict[str, str],
             timeout=300,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
-        return RuntimeError(f"ssh failed: {e}")
+        raise RuntimeError(f"ssh failed: {e}") from e
     if result.returncode != 0:
         raise RuntimeError(f"ssh exit {result.returncode}: {result.stderr.strip()}")
     lines = result.stdout.splitlines()
     if len(lines) != len(candidates):
-        return {}, (
+        raise RuntimeError(
             f"ssh returned {len(lines)} lines for {len(candidates)} files; "
             f"stderr: {result.stderr.strip()}"
         )
-    return {c.remote_path: line for c, line in zip(candidates, lines)}, None
+    return {c.remote_path: line for c, line in zip(candidates, lines)}
 
 
 def human_size(n: int) -> str:
@@ -249,10 +255,11 @@ def process_prune_folder(
 
     header = folder_header(folder, target.local)
 
-    statuses, err = remote_check(target.ssh, candidates)
-    if err is not None:
+    try:
+        statuses = remote_check(target.ssh, candidates)
+    except RuntimeError as e:
         print(header, file=sys.stderr)
-        sys.exit(f'   Aborting: cannot verify backup — {err}')
+        sys.exit(f'   Aborting: cannot verify backup — {e}')
 
     verified: list[Candidate] = []
     unverified: list[tuple[Candidate, str]] = []
